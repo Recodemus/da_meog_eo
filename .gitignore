@@ -1,0 +1,6 @@
+# DB 접속 정보가 담긴 파일은 제외
+db_connect.php
+
+# XAMPP 설정 파일 등 임시 파일 제외
+.DS_Store
+Thumbs.db

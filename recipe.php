@@ -2,60 +2,36 @@
 session_start();
 require_once 'db_connect.php';
 
-// 1. 로그인 확인
 if (!isset($_SESSION['user_id'])) {
-    echo "<script>alert('로그인이 필요한 서비스입니다.'); window.location.href='auth.php';</script>";
+    echo "<script>alert('로그인이 필요합니다.'); window.location.href='auth.php';</script>";
     exit;
 }
 
 $user_id = $_SESSION['user_id'];
 
 try {
-    // 2. 레시피 매칭 알고리즘 쿼리 (핵심 로직)
-    /* - COUNT(ri.ingredient_id): 레시피에 필요한 총 필수 재료 수
-       - SUM(CASE WHEN uf.ingredient_id IS NOT NULL THEN 1 ELSE 0 END): 내 냉장고에 있는 재료와 일치하는 수
-       - match_rate: 일치율 계산
-       - GROUP_CONCAT: 부족한 재료의 이름을 쉼표로 연결하여 한 번에 가져옴
-    */
-    // (recipe.php 상단 부분 수정)
-// ... 상단 코드는 동일 ...
-
-    // ★ 수정 1: SQL 쿼리 안의 :user_id 구멍 이름을 서로 다르게 바꿉니다.
+    // 1. 파라미터 이름 중복 방지 및 MAX() 적용
     $sql = "SELECT 
-                r.recipe_id, 
-                r.title,
-                r.is_external,
-                r.source_url,
-                r.cook_time,
+                r.recipe_id, r.title, r.is_external, r.source_url, r.cook_time,
                 COUNT(ri.ingredient_id) AS total_needed,
                 SUM(CASE WHEN uf.ingredient_id IS NOT NULL THEN 1 ELSE 0 END) AS matched_count,
                 ROUND((SUM(CASE WHEN uf.ingredient_id IS NOT NULL THEN 1 ELSE 0 END) / COUNT(ri.ingredient_id)) * 100) AS match_rate,
                 GROUP_CONCAT(CASE WHEN uf.ingredient_id IS NULL THEN i.name ELSE NULL END SEPARATOR ', ') AS missing_ingredients,
                 MAX(CASE WHEN b.bookmark_id IS NOT NULL THEN 1 ELSE 0 END) AS is_scraped
-                
             FROM recipes r
             JOIN recipe_ingredients ri ON r.recipe_id = ri.recipe_id AND ri.is_essential = 1
             JOIN ingredients i ON ri.ingredient_id = i.ingredient_id
-            -- 이 부분의 이름을 :user_id_fridge 로 변경
-            LEFT JOIN user_fridge uf ON ri.ingredient_id = uf.ingredient_id AND uf.user_id = :user_id_fridge
-            -- 이 부분의 이름을 :user_id_bookmark 로 변경
-            LEFT JOIN bookmarks b ON r.recipe_id = b.recipe_id AND b.user_id = :user_id_bookmark
-            
+            LEFT JOIN user_fridge uf ON ri.ingredient_id = uf.ingredient_id AND uf.user_id = :u_id1
+            LEFT JOIN bookmarks b ON r.recipe_id = b.recipe_id AND b.user_id = :u_id2
             GROUP BY r.recipe_id
-            ORDER BY match_rate DESC, matched_count DESC, r.cook_time ASC"; 
-            
+            ORDER BY match_rate DESC, matched_count DESC";
+
     $stmt = $pdo->prepare($sql);
-    
-    // ★ 수정 2: 바뀐 두 개의 구멍 이름에 각각 $user_id를 넣어줍니다.
-    $stmt->execute([
-        ':user_id_fridge' => $user_id,
-        ':user_id_bookmark' => $user_id
-    ]);
-    
+    $stmt->execute([':u_id1' => $user_id, ':u_id2' => $user_id]); // 각각 매핑
     $recommended_recipes = $stmt->fetchAll();
 
 } catch (PDOException $e) {
-    die("레시피 추천 데이터를 불러오는 중 오류가 발생했습니다: " . $e->getMessage());
+    die("에러 발생: " . $e->getMessage());
 }
 ?>
 
