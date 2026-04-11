@@ -1,6 +1,6 @@
 <?php
 // 데이터베이스 연결 정보 설정
-$host = '127.0.0.1';       // 데이터베이스 호스트 (보통 localhost 또는 127.0.0.1)
+$host = 'localhost';       // 데이터베이스 호스트 (보통 localhost 또는 127.0.0.1)
 $db   = 'da_meog_eo';      // 데이터베이스 이름
 $user = 'root';            // MySQL 사용자 아이디 (로컬 환경 기본값: root)
 $pass = '1234';                // MySQL 비밀번호 (APM, XAMPP 등 로컬 환경은 보통 비어있거나 'root' 입니다)
