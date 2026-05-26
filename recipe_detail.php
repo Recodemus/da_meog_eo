@@ -51,7 +51,22 @@ try {
         <?php endif; ?>
 
         <br><br>
-        <button onclick="history.back()" style="padding: 5px 10px;">뒤로 가기</button>
+        <button onclick="goBack()" style="padding: 5px 10px; cursor: pointer; background: #fff; border: 1px solid #ccc; border-radius: 4px;">
+            ⬅️ 뒤로 가기
+        </button>
+                
+        <script>
+        function goBack() {
+            // document.referrer는 '나를 이 페이지로 보낸 이전 페이지의 주소'를 기억합니다.
+            if (document.referrer) {
+                // 이전 페이지 주소가 있으면 무조건 거기로 돌아갑니다.
+                window.location.href = document.referrer;
+            } else {
+                // 새 창에서 열렸거나 주소를 직접 치고 들어와서 이전 기록이 없다면 홈으로 보냅니다.
+                window.location.href = 'index.php';
+            }
+        }
+        </script>
     </div>
 </body>
 </html>

@@ -2,33 +2,49 @@
 session_start();
 require_once 'db_connect.php';
 
-if (!isset($_SESSION['user_id'])) {
-    echo "<script>alert('로그인이 필요합니다.'); window.location.href='auth.php';</script>";
-    exit;
-}
+// 1. 사용자 입력값 받기 (GET 방식)
+$search = $_GET['search'] ?? '';
+$category = $_GET['category'] ?? '';
+$page = isset($_GET['page']) ? (int)$_GET['page'] : 1; // 현재 페이지 (기본값 1)
 
-$user_id = $_SESSION['user_id'];
+// 2. 페이지네이션 설정
+$limit = 10; // 한 페이지에 보여줄 레시피 개수
+$offset = ($page - 1) * $limit; // DB에서 건너뛸 개수 (1페이지면 0개, 2페이지면 10개 건너뜀)
 
 try {
-    // 1. 파라미터 이름 중복 방지 및 MAX() 적용
-    $sql = "SELECT 
-                r.recipe_id, r.title, r.is_external, r.source_url, r.cook_time,
-                COUNT(ri.ingredient_id) AS total_needed,
-                SUM(CASE WHEN uf.ingredient_id IS NOT NULL THEN 1 ELSE 0 END) AS matched_count,
-                ROUND((SUM(CASE WHEN uf.ingredient_id IS NOT NULL THEN 1 ELSE 0 END) / COUNT(ri.ingredient_id)) * 100) AS match_rate,
-                GROUP_CONCAT(CASE WHEN uf.ingredient_id IS NULL THEN i.name ELSE NULL END SEPARATOR ', ') AS missing_ingredients,
-                MAX(CASE WHEN b.bookmark_id IS NOT NULL THEN 1 ELSE 0 END) AS is_scraped
-            FROM recipes r
-            JOIN recipe_ingredients ri ON r.recipe_id = ri.recipe_id AND ri.is_essential = 1
-            JOIN ingredients i ON ri.ingredient_id = i.ingredient_id
-            LEFT JOIN user_fridge uf ON ri.ingredient_id = uf.ingredient_id AND uf.user_id = :u_id1
-            LEFT JOIN bookmarks b ON r.recipe_id = b.recipe_id AND b.user_id = :u_id2
-            GROUP BY r.recipe_id
-            ORDER BY match_rate DESC, matched_count DESC";
+    // 3. 동적 쿼리 작성 (검색어와 카테고리에 따라 WHERE 절이 달라짐)
+    $whereClause = "WHERE 1=1"; // 기본 조건 (항상 참)
+    $params = []; // PDO 파라미터 배열
+
+    if (!empty($search)) {
+        $whereClause .= " AND title LIKE :search";
+        $params[':search'] = "%{$search}%"; // 앞뒤로 %를 붙여 포함하는 단어 검색
+    }
+    
+    if (!empty($category)) {
+        // 참고: DB의 recipes 테이블에 'category' 컬럼이 있어야 합니다!
+        $whereClause .= " AND category = :category";
+        $params[':category'] = $category;
+    }
+
+    // 4. 전체 데이터 개수 구하기 (페이지 네비게이션을 그리기 위해 필요)
+    $countSql = "SELECT COUNT(*) FROM recipes $whereClause";
+    $countStmt = $pdo->prepare($countSql);
+    $countStmt->execute($params);
+    $total_records = $countStmt->fetchColumn();
+    $total_pages = ceil($total_records / $limit); // 총 페이지 수 계산 (올림)
+
+    // 5. 실제 데이터 가져오기 (LIMIT과 OFFSET 적용)
+    // 기존의 복잡한 쿼리(일치율 계산 등)에 위에서 만든 $whereClause와 LIMIT을 붙입니다.
+    $sql = "SELECT * FROM recipes 
+            $whereClause 
+            ORDER BY recipe_id DESC 
+            LIMIT $limit OFFSET $offset"; 
+            // (주의: 기존 일치율 쿼리를 쓰신다면 구조에 맞게 WHERE와 LIMIT을 끼워넣어야 합니다)
 
     $stmt = $pdo->prepare($sql);
-    $stmt->execute([':u_id1' => $user_id, ':u_id2' => $user_id]); // 각각 매핑
-    $recommended_recipes = $stmt->fetchAll();
+    $stmt->execute($params);
+    $recipes = $stmt->fetchAll();
 
 } catch (PDOException $e) {
     die("에러 발생: " . $e->getMessage());
@@ -78,6 +94,22 @@ try {
         <div class="sub-title">내 냉장고 재료를 바탕으로 가장 만들기 쉬운 요리를 찾아드려요!</div>
     </div>
 
+    <div class="search-box" style="margin-bottom: 20px; text-align: center;">
+        <form method="GET" action="recipe.php">
+            <select name="category" style="padding: 5px;">
+                <option value="">전체보기</option>
+                <option value="한식" <?= ($_GET['category'] ?? '') == '한식' ? 'selected' : '' ?>>한식</option>
+                <option value="양식" <?= ($_GET['category'] ?? '') == '양식' ? 'selected' : '' ?>>양식</option>
+                <option value="일식" <?= ($_GET['category'] ?? '') == '일식' ? 'selected' : '' ?>>일식</option>
+            </select>
+
+            <input type="text" name="search" placeholder="레시피 이름 검색..." 
+                   value="<?= htmlspecialchars($_GET['search'] ?? '') ?>" style="padding: 5px;">
+
+            <button type="submit" style="padding: 5px 10px;">검색</button>
+        </form>
+    </div>
+
     <div class="recipe-list">
         <?php if (empty($recommended_recipes)): ?>
             <div style="text-align:center; color:#999;">등록된 레시피가 없습니다.</div>
@@ -96,7 +128,7 @@ try {
             ?>
             
             <div class="recipe-card <?= $card_class ?>" onclick="window.open('<?= $link ?>', '_blank')">
-<div style="display: flex; justify-content: space-between; align-items: center;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
                     <h3 class="recipe-title">
                         <?= htmlspecialchars($recipe['title']) ?>
                         <?php if($recipe['is_external']): ?> <span class="badge">외부 링크</span> <?php endif; ?>
@@ -112,30 +144,30 @@ try {
                     </div>
                 </div>
 
-<script>
-    function toggleScrap(event, recipeId) {
-        event.stopPropagation(); // 중요! 카드를 클릭했을 때 새 창으로 넘어가는 것을 막아줍니다.
+                <script>
+                    function toggleScrap(event, recipeId) {
+                        event.stopPropagation(); // 중요! 카드를 클릭했을 때 새 창으로 넘어가는 것을 막아줍니다.
 
-        const formData = new FormData();
-        formData.append('recipe_id', recipeId);
+                        const formData = new FormData();
+                        formData.append('recipe_id', recipeId);
 
-        fetch('scrap_process.php', {
-            method: 'POST',
-            body: formData
-        })
-        .then(response => response.text())
-        .then(status => {
-            const starSpan = document.getElementById('scrap-' + recipeId);
-            if (status === 'added') {
-                starSpan.innerText = '⭐'; // 색칠된 별
-            } else if (status === 'removed') {
-                starSpan.innerText = '☆'; // 빈 별
-            } else {
-                alert('오류가 발생했습니다.');
-            }
-        });
-    }
-</script>
+                        fetch('scrap_process.php', {
+                            method: 'POST',
+                            body: formData
+                        })
+                        .then(response => response.text())
+                        .then(status => {
+                            const starSpan = document.getElementById('scrap-' + recipeId);
+                            if (status === 'added') {
+                                starSpan.innerText = '⭐'; // 색칠된 별
+                            } else if (status === 'removed') {
+                                starSpan.innerText = '☆'; // 빈 별
+                            } else {
+                                alert('오류가 발생했습니다.');
+                            }
+                        });
+                    }
+                </script>
                 
                 <div class="recipe-meta">
                     <span>⏱️ 조리 시간: <?= $recipe['cook_time'] ? $recipe['cook_time'].'분' : '미상' ?></span>
@@ -146,6 +178,31 @@ try {
                     <div class="ready-info">✨ 모든 재료가 준비되었어요! 바로 조리 가능합니다.</div>
                 <?php else: ?>
                     <div class="missing-info">🚨 부족한 재료: <?= htmlspecialchars($recipe['missing_ingredients']) ?></div>
+                <?php endif; ?>
+            </div>
+
+            <div class="pagination" style="text-align: center; margin-top: 30px;">
+                <?php
+                // 검색 조건이 페이지 이동 시에도 유지되도록 쿼리스트링 생성
+                $queryString = "";
+                if(!empty($search)) $queryString .= "&search=".urlencode($search);
+                if(!empty($category)) $queryString .= "&category=".urlencode($category);
+                ?>
+            
+                <?php if ($page > 1): ?>
+                    <a href="?page=<?= $page - 1 ?><?= $queryString ?>" style="padding: 5px;">[이전]</a>
+                <?php endif; ?>
+                
+                <?php for ($i = 1; $i <= $total_pages; $i++): ?>
+                    <?php if ($i == $page): ?>
+                        <strong style="padding: 5px; color: green;"><?= $i ?></strong>
+                    <?php else: ?>
+                        <a href="?page=<?= $i ?><?= $queryString ?>" style="padding: 5px;"><?= $i ?></a>
+                    <?php endif; ?>
+                <?php endfor; ?>
+                    
+                <?php if ($page < $total_pages): ?>
+                    <a href="?page=<?= $page + 1 ?><?= $queryString ?>" style="padding: 5px;">[다음]</a>
                 <?php endif; ?>
             </div>
 
